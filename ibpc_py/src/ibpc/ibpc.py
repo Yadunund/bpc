@@ -2,6 +2,7 @@ import argparse
 import os
 import shlex
 import threading
+import subprocess
 
 from rocker.core import DockerImageGenerator
 from rocker.core import get_rocker_version
@@ -41,13 +42,25 @@ available_datasets = {
 
 def fetch_dataset(dataset, output_path):
     (url_base, suffixes) = available_datasets[dataset]
-    for suffix in suffixes:
+    for suffix in sorted(suffixes):
+        # Sorted so that zip comes before z01
 
         url = url_base + suffix
         print(f"Downloading from url: {url}")
-        with urlopen(url) as zipurlfile:
-            with ZipFile(BytesIO(zipurlfile.read())) as zfile:
-                zfile.extractall(output_path)
+        # with urlopen(url) as zipurlfile:
+        #     with ZipFile(BytesIO(zipurlfile.read())) as zfile:
+        #         zfile.extractall(output_path)
+        # native zipfile doesn't support sharded zip files which are in the ipd dataset (see .z01)
+        # zipfile.BadZipFile: zipfiles that span multiple disks are not supported
+        # There's the same problem in the datasets module too
+
+        basename = os.path.basename(url)
+        zip_file = os.path.join(output_path, basename)
+        urllib.request.urlretrieve(url, zip_file)
+        if not suffix.endswith("zip"):
+            # SKip the extraction of z01 making sure it is present next to the same named zip file.
+            continue
+        subprocess.check_call(["7z", "x", "-y", basename], cwd=output_path)
 
 
 def main():
