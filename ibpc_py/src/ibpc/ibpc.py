@@ -1,6 +1,7 @@
 import argparse
 import os
 import shlex
+import shutil
 import threading
 import subprocess
 
@@ -10,7 +11,7 @@ from rocker.core import RockerExtensionManager
 from rocker.core import OPERATIONS_NON_INTERACTIVE
 
 from io import BytesIO
-from urllib.request import urlopen
+from urllib.request import urlretrieve
 import urllib.request
 from zipfile import ZipFile
 from contextlib import nullcontext
@@ -43,39 +44,30 @@ available_datasets = {
 
 def fetch_dataset(dataset, output_path):
     (url_base, suffixes) = available_datasets[dataset]
-    for suffix in sorted(suffixes):
-        if suffix.endswith("01"):
-            continue
+    fetched_files = []
+    for suffix in sorted(suffixes, reverse=True):
+
         # Sorted so that zip comes before z01
 
         url = url_base + suffix
-        print(f"Downloading from url: {url}")
-        url_two = None
-        if url.endswith('_test_all.zip'):
-            url_two = url[:-2]+"01"
         
+        print(f"Downloading from url: {url}")
+        outfile = os.path.basename(url)
+        (filename, headers) = urlretrieve(url, outfile)
+        # Append shard if found
+        if url.endswith("01"):
+            orig_filename = filename[:-2] + "ip"
+            print(f"Appending shard {filename} to {orig_filename}")
+            with open(filename,'ab') as zipfile:
+                with open(orig_filename,'rb') as fd:
+                    shutil.copyfileobj(fd, zipfile)
+        else:
+            fetched_files.append(filename)
 
-        with urlopen(url) as zipurlfile:
-            with urlopen(url_two)  if url_two else nullcontext(BytesIO()) as zipulrfile2:
-                if not url_two:
-                    zipulrfile2 = BytesIO() # Empty file to be ignored
-                else:
-                    print(f"Fetching extra zip file: {url_two}")
-                with ZipFile(BytesIO(zipurlfile.read() + zipulrfile2.read())) as zfile:
-                    zfile.extractall(output_path)
-        # native zipfile doesn't support sharded zip files which are in the ipd dataset (see .z01)
-        # zipfile.BadZipFile: zipfiles that span multiple disks are not supported
-        # There's the same problem in the datasets module too
-
-        continue
-
-        basename = os.path.basename(url)
-        zip_file = os.path.join(output_path, basename)
-        urllib.request.urlretrieve(url, zip_file)
-        if not suffix.endswith("zip"):
-            # SKip the extraction of z01 making sure it is present next to the same named zip file.
-            continue
-        subprocess.check_call(["7z", "x", "-y", basename], cwd=output_path)
+    for filename in fetched_files:
+        print(f"Unzipping {filename}")
+        with ZipFile(filename) as zfile:
+            zfile.extractall(output_path)
 
 
 def main():
