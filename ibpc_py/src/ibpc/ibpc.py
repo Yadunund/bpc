@@ -1,7 +1,9 @@
 import argparse
 import os
 import shlex
+import shutil
 import threading
+import subprocess
 
 from rocker.core import DockerImageGenerator
 from rocker.core import get_rocker_version
@@ -9,9 +11,10 @@ from rocker.core import RockerExtensionManager
 from rocker.core import OPERATIONS_NON_INTERACTIVE
 
 from io import BytesIO
-from urllib.request import urlopen
+from urllib.request import urlretrieve
 import urllib.request
 from zipfile import ZipFile
+from contextlib import nullcontext
 
 
 def get_bop_template(modelname):
@@ -41,13 +44,30 @@ available_datasets = {
 
 def fetch_dataset(dataset, output_path):
     (url_base, suffixes) = available_datasets[dataset]
-    for suffix in suffixes:
+    fetched_files = []
+    for suffix in sorted(suffixes, reverse=True):
+
+        # Sorted so that zip comes before z01
 
         url = url_base + suffix
+        
         print(f"Downloading from url: {url}")
-        with urlopen(url) as zipurlfile:
-            with ZipFile(BytesIO(zipurlfile.read())) as zfile:
-                zfile.extractall(output_path)
+        outfile = os.path.basename(url)
+        (filename, headers) = urlretrieve(url, outfile)
+        # Append shard if found
+        if url.endswith("01"):
+            orig_filename = filename[:-2] + "ip"
+            print(f"Appending shard {filename} to {orig_filename}")
+            with open(filename,'ab') as zipfile:
+                with open(orig_filename,'rb') as fd:
+                    shutil.copyfileobj(fd, zipfile)
+        else:
+            fetched_files.append(filename)
+
+    for filename in fetched_files:
+        print(f"Unzipping {filename}")
+        with ZipFile(filename) as zfile:
+            zfile.extractall(output_path)
 
 
 def main():
