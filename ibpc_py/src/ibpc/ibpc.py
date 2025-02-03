@@ -13,6 +13,7 @@ from io import BytesIO
 from urllib.request import urlopen
 import urllib.request
 from zipfile import ZipFile
+from contextlib import nullcontext
 
 
 def get_bop_template(modelname):
@@ -43,16 +44,30 @@ available_datasets = {
 def fetch_dataset(dataset, output_path):
     (url_base, suffixes) = available_datasets[dataset]
     for suffix in sorted(suffixes):
+        if suffix.endswith("01"):
+            continue
         # Sorted so that zip comes before z01
 
         url = url_base + suffix
         print(f"Downloading from url: {url}")
-        # with urlopen(url) as zipurlfile:
-        #     with ZipFile(BytesIO(zipurlfile.read())) as zfile:
-        #         zfile.extractall(output_path)
+        url_two = None
+        if url.endswith('_test_all.zip'):
+            url_two = url[:-2]+"01"
+        
+
+        with urlopen(url) as zipurlfile:
+            with urlopen(url_two)  if url_two else nullcontext(BytesIO()) as zipulrfile2:
+                if not url_two:
+                    zipulrfile2 = BytesIO() # Empty file to be ignored
+                else:
+                    print(f"Fetching extra zip file: {url_two}")
+                with ZipFile(BytesIO(zipurlfile.read() + zipulrfile2.read())) as zfile:
+                    zfile.extractall(output_path)
         # native zipfile doesn't support sharded zip files which are in the ipd dataset (see .z01)
         # zipfile.BadZipFile: zipfiles that span multiple disks are not supported
         # There's the same problem in the datasets module too
+
+        continue
 
         basename = os.path.basename(url)
         zip_file = os.path.join(output_path, basename)
